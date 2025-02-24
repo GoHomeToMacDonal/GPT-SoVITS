@@ -15,6 +15,7 @@ from AR.models.utils import (
     make_reject_y,
     get_batch_logps
 )
+from AR.models.cuda_graph_runner import DecodingCUDAGraphRunner
 from AR.modules.embedding import SinePositionalEmbedding
 from AR.modules.embedding import TokenEmbedding
 from AR.modules.transformer import LayerNorm
@@ -817,11 +818,16 @@ class Text2SemanticDecoder(nn.Module):
                                                 .view(bsz, self.num_head, src_len, src_len)\
                                                 .to(device=x.device, dtype=torch.bool)
 
+        decoder = DecodingCUDAGraphRunner(self, xy_pos.shape[0])
+        decoder.capture()
+
         for idx in tqdm(range(1500)):
             if xy_attn_mask is not None:
                 xy_dec, k_cache, v_cache = self.t2s_transformer.process_prompt(xy_pos, xy_attn_mask, None)
+                decoder.assign_kvcache(k_cache, v_cache)
             else:
-                xy_dec, k_cache, v_cache = self.t2s_transformer.decode_next_token(xy_pos, k_cache, v_cache)
+                # xy_dec, k_cache, v_cache = self.t2s_transformer.decode_next_token(xy_pos, k_cache, v_cache)
+                xy_dec = decoder(xy_pos)
 
             logits = self.ar_predict_layer(
                 xy_dec[:, -1]
